@@ -602,5 +602,6 @@ fn main() -> Result<(), String> {
         window: None,
         num_ops: 0,
     };
-    event_loop.run_app(&mut emu).expect("failed to run app");
+    event_loop.run_app(&mut emu).expect("failed to run the app");
+    Ok(())
 }
