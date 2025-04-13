@@ -14,7 +14,6 @@ enum KeyPressState {
 
 struct Emulator {
     key_input: KeyPressState,
-    // program: Vec<u16>,
     core: Core,
     window: Option<Window>,
     pixels: Option<Pixels>,
