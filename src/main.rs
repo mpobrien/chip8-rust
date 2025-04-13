@@ -603,5 +603,24 @@ fn main() -> Result<(), String> {
         window: None,
         num_ops: 0,
     };
+
+    let guard = pprof::ProfilerGuardBuilder::default()
+        .frequency(1000)
+        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        .build()
+        .unwrap();
+
     event_loop.run_app(&mut emu).expect("failed to run app");
+    println!("done");
+
+    if let Ok(report) = guard.report().build() {
+        let file = File::create("flamegraph.svg").unwrap();
+        let mut options = pprof::flamegraph::Options::default();
+        options.image_width = Some(2500);
+        report.flamegraph_with_options(file, &mut options).unwrap();
+    } else {
+        println!("bad");
+    };
+
+    Ok(())
 }
