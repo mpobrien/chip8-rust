@@ -18,6 +18,7 @@ struct Emulator {
     core: Core,
     window: Option<Window>,
     pixels: Option<Pixels>,
+    num_ops: u64,
 }
 
 macro_rules! reg_x {
@@ -372,6 +373,83 @@ impl Core {
             self.registers[reg as usize] = self.ram[self.ix as usize + reg as usize]
         }
     }
+
+    fn execute(&mut self, opcode: u16) -> bool {
+        if opcode == 0x00E0 {
+            self.cls();
+            return true;
+        }
+        if (opcode & 0xF000) == 0xD000 {
+            self.drw(reg_x!(opcode), reg_y!(opcode), (opcode & BITMASK_N) as u8);
+            return true;
+        }
+        if opcode == 0x00EE {
+            self.ret();
+        } else if (opcode & 0xF000) == 0x1000 {
+            self.jmp(opcode & BITMASK_NNN);
+        } else if (opcode & 0xF000) == 0x2000 {
+            self.call(opcode & BITMASK_NNN);
+        } else if (opcode & 0xF000) == 0x3000 {
+            self.se_n(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
+        } else if (opcode & 0xF000) == 0x4000 {
+            self.sne(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
+        } else if (opcode & 0xF00F) == 0x5000 {
+            self.se((reg_x!(opcode)) as u8, reg_y!(opcode))
+        } else if (opcode & 0xF000) == 0x6000 {
+            self.ld(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
+        } else if (opcode & 0xF000) == 0x7000 {
+            self.add_n(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
+        } else if (opcode & 0xF00F) == 0x8000 {
+            self.ld_vx_vy(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8001 {
+            self.or(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8002 {
+            self.and(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8003 {
+            self.xor(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8004 {
+            self.add_vx_vy(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8005 {
+            self.sub(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x8006 {
+            self.shr(reg_x!(opcode));
+        } else if (opcode & 0xF00F) == 0x8007 {
+            self.subn(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF00F) == 0x800E {
+            self.shl(reg_x!(opcode));
+        } else if (opcode & 0xF00F) == 0x9000 {
+            self.sne_vx_vy(reg_x!(opcode), reg_y!(opcode));
+        } else if (opcode & 0xF000) == 0xA000 {
+            self.ld_i((opcode & BITMASK_NNN) as u16);
+        } else if (opcode & 0xF000) == 0xB000 {
+            self.jmp_v0((opcode & BITMASK_NNN) as u16);
+        } else if (opcode & 0xF000) == 0xC000 {
+            self.rnd(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
+        } else if (opcode & 0xF0FF) == 0xE09E {
+            self.skp(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xE0A1 {
+            self.sknp(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF007 {
+            self.ld_dt_to_vx(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF015 {
+            self.ld_vx_to_dt(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF018 {
+            self.ld_st(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF01E {
+            self.add(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF029 {
+            self.ld_f(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF033 {
+            self.ld_b(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF055 {
+            self.ld_to_i(reg_x!(opcode));
+        } else if (opcode & 0xF0FF) == 0xF065 {
+            self.ld_from_i(reg_x!(opcode));
+        } else {
+            panic!("idk opcode {:#06}", opcode);
+        }
+        false
+    }
 }
 
 impl ApplicationHandler for Emulator {
@@ -395,9 +473,16 @@ impl ApplicationHandler for Emulator {
                 self.key_input = KeyPressState::Waiting(reg_x!(next_instruction) as u8);
                 return;
             }
-            if execute(next_instruction, &mut self.core) {
+            println!("[pc={}] executing {}", self.core.pc, next_instruction);
+            if self.core.execute(next_instruction) {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
+            }
+            self.num_ops += 1;
+            if self.num_ops > 100000000 {
+                println!("exiting!");
+                _event_loop.exit();
+                break;
             }
         }
     }
@@ -491,83 +576,6 @@ impl ApplicationHandler for Emulator {
     }
 }
 
-fn execute(opcode: u16, machine: &mut Core) -> bool {
-    if opcode == 0x00E0 {
-        machine.cls();
-        return true;
-    }
-    if (opcode & 0xF000) == 0xD000 {
-        machine.drw(reg_x!(opcode), reg_y!(opcode), (opcode & BITMASK_N) as u8);
-        return true;
-    }
-    if opcode == 0x00EE {
-        machine.ret();
-    } else if (opcode & 0xF000) == 0x1000 {
-        machine.jmp(opcode & BITMASK_NNN);
-    } else if (opcode & 0xF000) == 0x2000 {
-        machine.call(opcode & BITMASK_NNN);
-    } else if (opcode & 0xF000) == 0x3000 {
-        machine.se_n(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
-    } else if (opcode & 0xF000) == 0x4000 {
-        machine.sne(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
-    } else if (opcode & 0xF00F) == 0x5000 {
-        machine.se((reg_x!(opcode)) as u8, reg_y!(opcode))
-    } else if (opcode & 0xF000) == 0x6000 {
-        machine.ld(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
-    } else if (opcode & 0xF000) == 0x7000 {
-        machine.add_n(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
-    } else if (opcode & 0xF00F) == 0x8000 {
-        machine.ld_vx_vy(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8001 {
-        machine.or(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8002 {
-        machine.and(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8003 {
-        machine.xor(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8004 {
-        machine.add_vx_vy(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8005 {
-        machine.sub(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x8006 {
-        machine.shr(reg_x!(opcode));
-    } else if (opcode & 0xF00F) == 0x8007 {
-        machine.subn(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF00F) == 0x800E {
-        machine.shl(reg_x!(opcode));
-    } else if (opcode & 0xF00F) == 0x9000 {
-        machine.sne_vx_vy(reg_x!(opcode), reg_y!(opcode));
-    } else if (opcode & 0xF000) == 0xA000 {
-        machine.ld_i((opcode & BITMASK_NNN) as u16);
-    } else if (opcode & 0xF000) == 0xB000 {
-        machine.jmp_v0((opcode & BITMASK_NNN) as u16);
-    } else if (opcode & 0xF000) == 0xC000 {
-        machine.rnd(reg_x!(opcode), (opcode & BITMASK_NN) as u8);
-    } else if (opcode & 0xF0FF) == 0xE09E {
-        machine.skp(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xE0A1 {
-        machine.sknp(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF007 {
-        machine.ld_dt_to_vx(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF015 {
-        machine.ld_vx_to_dt(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF018 {
-        machine.ld_st(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF01E {
-        machine.add(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF029 {
-        machine.ld_f(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF033 {
-        machine.ld_b(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF055 {
-        machine.ld_to_i(reg_x!(opcode));
-    } else if (opcode & 0xF0FF) == 0xF065 {
-        machine.ld_from_i(reg_x!(opcode));
-    } else {
-        panic!("idk opcode {:#06}", opcode);
-    }
-    false
-}
-
 fn load_program(file_path: &str) -> std::io::Result<Vec<u8>> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
@@ -575,18 +583,15 @@ fn load_program(file_path: &str) -> std::io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-fn main() {
-    let program = load_program("/Users/mikeo/Downloads/Chrome Downloads/1-chip8-logo.ch8")
-        .expect("failed to load program");
-    // let program = load_program("/Users/mikeo/Downloads/Chrome Downloads/IBM Logo.ch8").expect("failed to load program");
-    // let program = load_program("/Users/mikeo/Downloads/Chrome Downloads/test_opcode.ch8").expect("failed to load program");
-    // let program: Vec<u8> = vec![
-    //     0xa0, 0x2d,
-    //     0x62, 0x10,
-    //     0x63, 0x05,
-    //     0xd2, 0x35,
-    //     0x12, 0x08,
-    // ];
+fn main() -> Result<(), String> {
+    let args: Vec<String> = std::env::args().collect();
+    let rom_path = if args.len() >= 2 {
+        args[1].clone()
+    }else {
+        "/Users/mikeo/Downloads/IBM Logo.ch8".to_string()
+    };
+    let program = load_program(&rom_path)
+        .map_err(|e| format!("failed to load program: {}", e))?;
 
     let event_loop = EventLoop::new().unwrap();
     let core = Core::new(64, 32, &program);
@@ -596,6 +601,7 @@ fn main() {
         pixels: None,
         core,
         window: None,
+        num_ops: 0,
     };
     event_loop.run_app(&mut emu).expect("failed to run app");
 }
